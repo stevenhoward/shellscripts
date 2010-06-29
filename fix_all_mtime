@@ -1,0 +1,34 @@
+#!/usr/bin/python -OO
+
+''' Quick and dirty script to copy access and modification times from one
+directory tree to one that is (hopefully) identical.  Only updates files
+if their size is the same; it's not a perfect method, but it should work
+in most cases.
+
+I use this for when my backups don't have their mtime preserved due to me
+screwing things up'''
+
+import os, os.path
+import sys
+
+def fix_all_files(ROOT, DEST):
+    for root, dirs, files in os.walk(ROOT):
+        destroot = root.replace(ROOT, DEST)
+        try:
+            s = os.stat(root)
+            os.utime(destroot, (s.st_atime, s.st_mtime))
+            for f in files:
+                f = os.path.join(root, f)
+                destf = f.replace(ROOT, DEST, 1)
+                s = os.stat(f)
+                ds = os.stat(destf)
+                if s.st_size == ds.st_size and s.st_mtime != ds.st_mtime:
+                    os.utime(destf, (s.st_atime, s.st_mtime))
+        except OSError, e:
+            print 'ERROR %s: skipping' % e
+
+if __name__ == '__main__':
+    if len(sys.argv) != 3:
+        print 'usage: %s [source] [dest]'
+        exit(1)
+    fix_all_files(*sys.argv[1:])

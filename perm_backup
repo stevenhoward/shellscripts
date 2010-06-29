@@ -55,7 +55,8 @@ def restore_perms_all(read_in, dryrun=False, verbose=False):
 
         If dryrun is true, it prints the commands without executing
     '''
-    if dryrun:
+    verbose |= dryrun
+    if verbose:
         import grp, pwd
         unames = {}
         groups = {}
@@ -65,7 +66,7 @@ def restore_perms_all(read_in, dryrun=False, verbose=False):
             groups[i.gr_gid] = i.gr_name
 
     for mode, uid, gid, fname in imap(load_perm, read_in):
-        if dryrun or verbose:
+        if verbose:
             print 'chmod %lo %s' % (mode & 07777, fname)
             print 'chown %s:%s %s' % (unames.get(uid, 'UNKNOWN'), groups.get(gid, 'UNKNOWN'), fname)
         if not dryrun:

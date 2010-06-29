@@ -1,0 +1,104 @@
+#!/usr/bin/python -OO
+
+'''
+  Copies the permissions from the given directory at the command line to a gzip
+  file (default OUT_FILE)
+
+  This is necessary because Windows doesn't understand UNIX file perms
+'''
+
+from os import stat, walk, chmod, chown
+from os.path import join as pathjoin
+from functools import partial
+from itertools import imap, ifilter
+from struct import pack, calcsize, unpack
+from gzip import open as gzopen
+from optparse import OptionParser
+
+OUT_FILE='/mnt/research/home.0/perms.gz'
+STRUCT_FMT='HII'
+STRUCT_SIZE=calcsize(STRUCT_FMT)
+
+def fmt_perms(fpath):
+    'Create a structure with the permissions and append the file path as a string'
+    try:
+        s = stat(fpath)
+    except OSError as e:
+        print "WARNING: got error %s from OS on file %s" % (str(e), fpath)
+        return
+    fdata = pack(STRUCT_FMT, *(getattr(s, x) for x in ['st_mode', 'st_uid', 'st_gid']))
+    return fdata + fpath + '\n'
+
+def save_perms_all(write_out, froot, dryrun=False, verbose=False):
+    'format permissions for all files and directories in froot'
+    def _fmt_perms(root, x):
+        return fmt_perms(pathjoin(root, x))
+
+    for root, dirs, files in walk(froot):
+        __fmt_perms = partial(_fmt_perms, root)
+        if verbose or dryrun: print 'Entering ' + root
+        if not dryrun:
+            write_out(fmt_perms(root))
+            for i in ifilter(None, imap(__fmt_perms, files)):
+                write_out(i)
+
+def load_perm(sz):
+    'Load and return our permission struct from a file'
+    mode, uid, gid = unpack(STRUCT_FMT, sz[:STRUCT_SIZE])
+    return (mode, uid, gid, sz[STRUCT_SIZE:-1])
+
+def restore_perms_all(read_in, dryrun=False, verbose=False):
+    '''
+        Restore all permissions from the configuration file to the directory
+        tree specified within.  If verbose is True, it prints out the
+        equivalent UNIX commands and then executes the Python equivalents.
+
+        If dryrun is true, it prints the commands without executing
+    '''
+    if dryrun:
+        import grp, pwd
+        unames = {}
+        groups = {}
+        for i in pwd.getpwall():
+            unames[i.pw_uid] = i.pw_name
+        for i in grp.getgrall():
+            groups[i.gr_gid] = i.gr_name
+
+    for mode, uid, gid, fname in imap(load_perm, read_in):
+        if dryrun or verbose:
+            print 'chmod %lo %s' % (mode & 07777, fname)
+            print 'chown %s:%s %s' % (unames.get(uid, 'UNKNOWN'), groups.get(gid, 'UNKNOWN'), fname)
+        if not dryrun:
+            chmod(fname, mode)
+            chown(fname, uid, gid)
+
+
+def main():
+    parser = OptionParser(usage='usage: %prog [-fsrd]', version='%prog 0.1')
+    parser.add_option('-f', '--file', action='store', type='string',
+        dest='fname', default=OUT_FILE,
+        help='filename to save the permission database to: should end in .gz')
+    parser.add_option('-s', '--save', action='store_true',
+        dest='save', help='Save the permission database to a file, default: ' + OUT_FILE)
+    parser.add_option('-r', '--restore', action='store_true',
+        dest='restore', help='Restore the permission database using the file tree contained within')
+    parser.add_option('-d', '--dryrun', action='store_true',
+        dest='dry', help='Show what will happen instead of actually doing it')
+    parser.add_option('-v', '--verbose', action='store_true',
+        dest='verbose', help='Print out directory names while saving, or commands while restoring', default=False)
+
+    (opts, args) = parser.parse_args()
+    if opts.save:
+        if len(args) == 1:
+            write_out = gzopen(opts.fname, 'wb').write
+            save_perms_all(write_out, args[0], verbose=opts.verbose)
+            exit(0)
+    elif opts.restore:
+        read_in = gzopen(opts.fname, 'rb')
+        restore_perms_all(read_in, opts.dry, verbose=opts.verbose)
+        exit(0)
+    parser.print_help()
+    exit(1)
+
+if __name__ == '__main__':
+    main()
